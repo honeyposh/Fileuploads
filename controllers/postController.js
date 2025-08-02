@@ -1,51 +1,42 @@
 const postModel = require("../models/postModel");
 const cloudinary = require("../utils/cloudinary");
 const fs = require("fs/promises");
-const safeUnlink = async (filePath) => {
-  if (filePath) {
-    try {
-      await fs.unlink(filePath);
-    } catch (error) {
-      console.log(error);
-    }
-  }
-};
-exports.postMultipleUpload = async (req, res, next) => {
-  const file = req.files;
-  let uploadedImages = [];
-  const cleanupFiles = async () => {
-    await safeUnlink(file?.["previewPix"]?.[0]?.path);
-    await safeUnlink(file?.["detailPix"]?.[0]?.path);
-  };
-  try {
-    const previewPixResponse = await cloudinary.uploader.upload(
-      file["previewPix"][0].path,
-      { folder: "axia" }
-    );
-    uploadedImages.push(previewPixResponse.public_id);
 
-    const detailPixResponse = await cloudinary.uploader.upload(
-      file["detailPix"][0].path,
-      { folder: "axia" }
-    );
-    uploadedImages.push(detailPixResponse.public_id);
-    const newPost = await postModel.create({
-      detailPix: detailPixResponse.secure_url,
-      previewPix: previewPixResponse.secure_url,
-      detailPixId: detailPixResponse.public_id,
-      previewPixId: previewPixResponse.public_id,
+exports.postMultipleUpload = async (req, res, next) => {
+  const filePath = [];
+  console.log(filePath);
+  try {
+    if (!req.files || Object.keys(req.files).length === 0) {
+      const error = new Error("No files uploaded");
+      error.status = 400;
+      next(error);
+    }
+    const uploadedFiles = {};
+    for (const fieldName of Object.keys(req.files)) {
+      uploadedFiles[fieldName] = [];
+      for (const file of req.files[fieldName]) {
+        filePath.push(file.path);
+        const response = await cloudinary.uploader.upload(file.path, {
+          folder: "Axia",
+        });
+        uploadedFiles[fieldName].push(response.secure_url);
+        fs.unlink(file.path);
+      }
+    }
+    const postupload = await postModel.create({
+      previewPix: uploadedFiles["previewPix"] || [],
+      detailPix: uploadedFiles["detailPix"] || [],
     });
-    await cleanupFiles();
-    return res.status(201).json({ newPost });
+    console.log(filePath);
+    return res.json(postupload);
   } catch (error) {
-    for (const publicId of uploadedImages) {
+    for (path of filePath) {
       try {
-        await cloudinary.uploader.destroy(publicId);
+        await fs.unlink(path);
       } catch (error) {
         console.log(error);
       }
     }
-    await cleanupFiles();
-    next(error);
+    return next(error);
   }
 };
